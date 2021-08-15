@@ -16,7 +16,7 @@
 
 ## Demo
 
-[![asciicast](https://asciinema.org/a/nWronQ3nPXC3LdWt3DulWUCHt.svg)](https://asciinema.org/a/nWronQ3nPXC3LdWt3DulWUCHt)
+[![safehodl demo](https://asciinema.org/a/430538.svg)](https://asciinema.org/a/430538)
 
 ## Features
 
