@@ -18,6 +18,8 @@
 
 [![safehodl demo](https://asciinema.org/a/430538.svg)](https://asciinema.org/a/430538)
 
+_A random Bitcoin holdings amount was used for the demo._
+
 ## Features
 
 - [x] Data on disk is encrypted using [AES encryption](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) + [GCM encryption algorithm](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
