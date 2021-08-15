@@ -16,7 +16,7 @@
 
 ## Demo
 
-![demo](demo.png)
+[![asciicast](https://asciinema.org/a/nWronQ3nPXC3LdWt3DulWUCHt.svg)](https://asciinema.org/a/nWronQ3nPXC3LdWt3DulWUCHt)
 
 ## Features
 
