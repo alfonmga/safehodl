@@ -22,7 +22,7 @@ _A random Bitcoin holdings amount was used for the demo._
 
 ## Features
 
-- [x] Critical data (`$HOME/.safehodl`) is protected thanks to [Argon2id](https://en.wikipedia.org/wiki/Argon2) + [Argon2id KDF](https://pkg.go.dev/golang.org/x/crypto/argon2#IDKey) + [AES-256 bits encryption](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) + [Galois/Counter Mode](https://en.wikipedia.org/wiki/Galois/Counter_Mode
+- [x] Critical data (`$HOME/.safehodl`) is protected thanks to [Argon2id](https://en.wikipedia.org/wiki/Argon2) + [Argon2id KDF](https://pkg.go.dev/golang.org/x/crypto/argon2#IDKey) + [AES-256 bits encryption](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) + [Galois/Counter Mode](https://en.wikipedia.org/wiki/Galois/Counter_Mode]
 - [x] Passphrase protection for secure SafeHODL access and usage
 - [x] Remove data if incorrect passphrase is entered
 - [x] Bitcoin holdings value calculated in USD and EUR ([Kraken.com public API](https://docs.kraken.com/rest/))
