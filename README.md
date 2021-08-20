@@ -22,9 +22,9 @@ _A random Bitcoin holdings amount was used for the demo._
 
 ## Features
 
-- [x] Data on disk is encrypted using [AES encryption](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) + [GCM encryption algorithm](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
-- [x] Pin code protection for secure access
-- [x] Remove data if wrong access pin code is entered
+- [x] Critical data (`$HOME/.safehodl`) is protected thanks to [Argon2id](https://en.wikipedia.org/wiki/Argon2) + Argon2id [KDF](https://en.wikipedia.org/wiki/Key_derivation_function) + [AES-256 bits encryption](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) + [Galois/Counter Mode](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
+- [x] Passphrase protection for secure SafeHODL access and usage
+- [x] Remove data if incorrect passphrase is entered
 - [x] Bitcoin holdings value calculated in USD and EUR ([Kraken.com public API](https://docs.kraken.com/rest/))
 
 ## Usage

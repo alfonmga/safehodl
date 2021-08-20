@@ -6,20 +6,21 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
 	"syscall"
+	"time"
 
+	"github.com/alexedwards/argon2id"
 	krakenapi "github.com/beldur/kraken-go-api-client"
 	"github.com/jedib0t/go-pretty/v6/table"
+	bolt "go.etcd.io/bbolt"
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/term"
 )
 
-var Secret32BytesKeyAES string
-
-func getSafeHodlDotFilePath() string {
+func getSafeHodlDbPath() string {
 	userHomeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
@@ -28,42 +29,143 @@ func getSafeHodlDotFilePath() string {
 	return fmt.Sprintf("%s/.safehodl", userHomeDir)
 }
 
+func openSafeHodlDb() *bolt.DB {
+	db, err := bolt.Open(getSafeHodlDbPath(), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return db
+}
+
 // StartInteractiveSafeHodlConfiguration SafeHODL interactive configuration.
 func StartInteractiveSafeHodlConfiguration() {
 	fmt.Printf("========================\n SafeHODL Configuration\n========================\n")
 	fmt.Println("Enter your Bitcoin holdings amount: ")
-	amount, err := term.ReadPassword(int(syscall.Stdin))
+	btcAmount, err := term.ReadPassword(int(syscall.Stdin))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	amountFloat, err := strconv.ParseFloat(string(amount), 64)
+	btcAmountFloat, err := strconv.ParseFloat(string(btcAmount), 64)
 	if err != nil {
-		fmt.Printf("Invalid amount. %s", err)
+		fmt.Printf("Invalid BTC amount. %s", err)
 		os.Exit(1)
 	}
-	persistHodlAmount(amountFloat)
+
+	trySetupPassphrase()
+	persistHodlAmount(btcAmountFloat)
 
 	fmt.Println("All set! now you can run \"safehodl\".")
 }
 
-// AssertPinCodeForUsage asks for access pin code and if a wrong pin code is entered then removes the data.
-func AssertPinCodeForUsage(pinCode string) {
-	fmt.Println("Enter PIN code: ")
-	passwd, err := term.ReadPassword(int(syscall.Stdin))
+// trySetupPassphrase checks if a passphrase hash is already in the db.
+func trySetupPassphrase() {
+	db := openSafeHodlDb()
+	defer db.Close()
+
+	var existingPassphraseHashBlob []byte
+	err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("auth"))
+		if err != nil {
+			return err
+		}
+		existingPassphraseHashBlob = b.Get([]byte("passphrase"))
+		return nil
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if string(passwd) != pinCode {
-		os.Remove(getSafeHodlDotFilePath()) // nuke data
-		fmt.Print("Incorrect PIN code!!")
-		os.Exit(0)
+	if len(existingPassphraseHashBlob) == 0 {
+		fmt.Println("Enter a secret passphrase for secure access: ")
+		plainNewPassphraseBlob, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		hashedNewPassphrase, err := argon2id.CreateHash(string(plainNewPassphraseBlob), argon2id.DefaultParams)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte("auth"))
+			return b.Put([]byte("passphrase"), []byte(hashedNewPassphrase))
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+
 }
 
-func encHodlAmount(amount float64) []byte {
-	c, err := aes.NewCipher([]byte(Secret32BytesKeyAES))
+// AssertPassphrase asks the user for a passphrase and if a wrong passphrase is provided then optimistically removes the data.
+func AssertPassphrase() {
+	fmt.Println("Enter passphrase: ")
+	plainPassphrase, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db := openSafeHodlDb()
+	defer db.Close()
+
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("auth"))
+		passphraseHash := b.Get([]byte("passphrase"))
+
+		matchPassphrase, err := argon2id.ComparePasswordAndHash(string(plainPassphrase), string(passphraseHash))
+		if err != nil {
+			return err
+		}
+
+		if !matchPassphrase {
+			os.Remove(getSafeHodlDbPath()) // nuke data
+			fmt.Print("Incorrect passphrase!!")
+			os.Exit(0)
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func getStoredPassphrase() (encKey []byte, salt []byte, params *argon2id.Params) {
+	db := openSafeHodlDb()
+	defer db.Close()
+
+	var passphraseHashBlob []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("auth"))
+		passphraseHashBlob = b.Get([]byte("passphrase"))
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	hashParams, passphraseSalt, encPassphrase, err := argon2id.DecodeHash(string(passphraseHashBlob))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return encPassphrase, passphraseSalt, hashParams
+}
+
+// deriveIDKeyFromStoredPassphraseHash derives a AES-256 private key from stored passphrase.
+func deriveIDKeyFromStoredPassphraseHash() []byte {
+	encKey, salt, _ := getStoredPassphrase()
+
+	return argon2.IDKey(encKey, salt, 1, 64*1024, 2, 32)
+}
+
+func encHoldingAmount(amount float64) []byte {
+	key := deriveIDKeyFromStoredPassphraseHash()
+
+	c, err := aes.NewCipher(key)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,22 +182,24 @@ func encHodlAmount(amount float64) []byte {
 
 	return gcm.Seal(nonce, nonce, []byte(fmt.Sprintf("%f", amount)), nil)
 }
-func persistHodlAmount(amount float64) {
-	encAmount := encHodlAmount(amount)
+func decBtcHoldingAmountFromDb() float64 {
+	var hodlingsAmountBlob []byte
 
-	err := ioutil.WriteFile(getSafeHodlDotFilePath(), encAmount, 0644)
+	db := openSafeHodlDb()
+
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("holdings"))
+		hodlingsAmountBlob = b.Get([]byte("BTC"))
+		return nil
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-}
+	db.Close()
 
-func decHodlAmountFromFile() float64 {
-	hodlAmountEncBlob, err := ioutil.ReadFile(getSafeHodlDotFilePath())
-	if err != nil {
-		log.Fatal(err)
-	}
+	key := deriveIDKeyFromStoredPassphraseHash()
 
-	c, err := aes.NewCipher([]byte(Secret32BytesKeyAES))
+	c, err := aes.NewCipher(key)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -105,11 +209,11 @@ func decHodlAmountFromFile() float64 {
 	}
 
 	nonceSize := gcm.NonceSize()
-	if len(hodlAmountEncBlob) < nonceSize {
+	if len(hodlingsAmountBlob) < nonceSize {
 		log.Fatal(err)
 	}
 
-	nonce, ciphertext := hodlAmountEncBlob[:nonceSize], hodlAmountEncBlob[nonceSize:]
+	nonce, ciphertext := hodlingsAmountBlob[:nonceSize], hodlingsAmountBlob[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -123,25 +227,54 @@ func decHodlAmountFromFile() float64 {
 	return hodlAmount
 }
 
-func hasHodlAmount() bool {
-	_, err := os.Stat(getSafeHodlDotFilePath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false
+func persistHodlAmount(amount float64) {
+	encAmount := encHoldingAmount(amount)
+
+	db := openSafeHodlDb()
+	defer db.Close()
+
+	err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("holdings"))
+		if err != nil {
+			return err
 		}
+		err = b.Put([]byte("BTC"), encAmount)
+		return err
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func hasBtcAmountSet() bool {
+	var hasBtcHoldingsAmountSet bool
+
+	db := openSafeHodlDb()
+	defer db.Close()
+
+	err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("holdings"))
+		if err != nil {
+			return err
+		}
+		btcHoldingsAmountBlob := b.Get([]byte("BTC"))
+		hasBtcHoldingsAmountSet = len(btcHoldingsAmountBlob) > 0
+		return nil
+	})
+	if err != nil {
 		log.Fatal(err)
 	}
 
-	return true
+	return hasBtcHoldingsAmountSet
 }
 
-// GetHodlAmount decrypts holdings amount from encrypted .safehodl file and returns it.
-func GetHodlAmount() (hasStoredAmount bool, storedAmount float64) {
-	if !hasHodlAmount() {
+// GetBtcAmount decrypts holdings amount from encrypted .safehodl file and returns it.
+func GetBtcAmount() (hasBtcHoldingsAmountSet bool, storedBtcAmount float64) {
+	if !hasBtcAmountSet() {
 		return false, 0
 	}
 
-	return true, decHodlAmountFromFile()
+	return true, decBtcHoldingAmountFromDb()
 }
 
 func getBitcoinPrices() (usd float64, eur float64) {
@@ -166,7 +299,7 @@ func getBitcoinPrices() (usd float64, eur float64) {
 
 // DisplayHodlInfo prints on screen holdings information.
 func DisplayHodlInfo() {
-	_, hodlAmount := GetHodlAmount()
+	_, btcAmount := GetBtcAmount()
 
 	btcUSD, btcEUR := getBitcoinPrices()
 
@@ -174,8 +307,8 @@ func DisplayHodlInfo() {
 	satoshiUSD := btcUSD * oneBitcoinSatoshi
 	satoshiEUR := btcEUR * oneBitcoinSatoshi
 
-	hodlAmountUSD := hodlAmount * btcUSD
-	hodlAmountEUR := hodlAmount * btcEUR
+	btcAmountUSD := btcAmount * btcUSD
+	btcAmountEUR := btcAmount * btcEUR
 
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
@@ -185,7 +318,7 @@ func DisplayHodlInfo() {
 		{"1 Satoshi", fmt.Sprintf("$%.4f", satoshiUSD), fmt.Sprintf("%.4f€", satoshiEUR)},
 	})
 	t.AppendSeparator()
-	t.AppendRow([]interface{}{fmt.Sprintf("%.8f", hodlAmount), fmt.Sprintf("$%.2f", hodlAmountUSD), fmt.Sprintf("%.2f€", hodlAmountEUR)})
+	t.AppendRow([]interface{}{fmt.Sprintf("%.8f", btcAmount), fmt.Sprintf("$%.2f", btcAmountUSD), fmt.Sprintf("%.2f€", btcAmountEUR)})
 
 	t.Render()
 }

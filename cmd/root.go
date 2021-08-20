@@ -8,17 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var PinCode string
-
 var rootCmd = &cobra.Command{
 	Use:   "safehodl",
 	Short: "SafeHodl",
 	Long: `Track your Bitcoin holdings value in a safe way
 https://github.com/alfonmga/safehodl`,
 	Run: func(cmd *cobra.Command, args []string) {
-		safehodl.AssertPinCodeForUsage(PinCode)
+		safehodl.AssertPassphrase()
 
-		hasStoredAmount, _ := safehodl.GetHodlAmount()
+		hasStoredAmount, _ := safehodl.GetBtcAmount()
 		if !hasStoredAmount {
 			fmt.Println(`Error: Execute first "safehodl config" to configure SafeHODL.`)
 			os.Exit(0)
@@ -28,9 +26,6 @@ https://github.com/alfonmga/safehodl`,
 	},
 }
 
-func Execute(secret32BytesKeyAES string, pinCode string) {
-	PinCode = pinCode
-	safehodl.Secret32BytesKeyAES = secret32BytesKeyAES
-
+func Execute() {
 	cobra.CheckErr(rootCmd.Execute())
 }
