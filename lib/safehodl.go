@@ -53,7 +53,7 @@ func StartInteractiveSafeHodlConfiguration() {
 	}
 
 	trySetupPassphrase()
-	persistHodlAmount(btcAmountFloat)
+	persistBtcAmountHoldings(btcAmountFloat)
 
 	fmt.Println("All set! now you can run \"safehodl\".")
 }
@@ -227,8 +227,8 @@ func decBtcHoldingAmountFromDb() float64 {
 	return hodlAmount
 }
 
-func persistHodlAmount(amount float64) {
-	encAmount := encHoldingAmount(amount)
+func persistBtcAmountHoldings(btcAmount float64) {
+	encBtcAmount := encHoldingAmount(btcAmount)
 
 	db := openSafeHodlDb()
 	defer db.Close()
@@ -238,7 +238,7 @@ func persistHodlAmount(amount float64) {
 		if err != nil {
 			return err
 		}
-		err = b.Put([]byte("BTC"), encAmount)
+		err = b.Put([]byte("BTC"), encBtcAmount)
 		return err
 	})
 	if err != nil {
